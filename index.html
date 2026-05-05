@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Smart Safety Dashboard</title>
+  <title>Smart Safety Control Center</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
@@ -24,6 +24,10 @@
     }
     .alert-glow { box-shadow: 0 0 0 1px rgba(248,113,113,.35), 0 0 30px rgba(239,68,68,.18); }
     .safe-glow { box-shadow: 0 0 0 1px rgba(74,222,128,.18), 0 0 22px rgba(34,197,94,.08); }
+    .compact-card { min-height: 108px; }
+    .grid-fit { display:grid; grid-template-columns: repeat(12, minmax(0,1fr)); gap: 12px; }
+    @media (max-width: 1024px){ .grid-fit { grid-template-columns: repeat(6, minmax(0,1fr)); } }
+    @media (max-width: 640px){ .grid-fit { grid-template-columns: repeat(2, minmax(0,1fr)); } }
     .pulse-dot { animation: pulse 1.4s infinite; }
     @keyframes pulse { 0%,100%{transform:scale(1); opacity:1} 50%{transform:scale(1.25); opacity:.65} }
     .sweep { position: relative; overflow: hidden; }
@@ -36,200 +40,205 @@
   </style>
 </head>
 <body class="text-slate-100">
-  <div class="max-w-[1200px] mx-auto px-3 py-3 lg:px-4 lg:py-4">
-    <!-- Header -->
-    <header class="glass rounded-3xl px-4 py-3 mb-3 flex flex-wrap items-center justify-between gap-3">
-      <div>
-        <div class="text-2xl lg:text-3xl font-black tracking-tight">Smart Safety Dashboard</div>
-        <div class="text-slate-400 text-sm lg:text-base">Realtime monitoring from Firebase</div>
-      </div>
-      <div class="glass rounded-2xl px-3 py-2 min-w-[150px] text-center">
-        <div class="text-slate-400 text-xs">Last Update</div>
-        <div id="lastUpdate" class="font-bold text-sm">Loading...</div>
-      </div>
-    </header>
-
-    <!-- Alert Status -->
-    <section id="alertBox" class="glass safe-glow rounded-[28px] px-4 py-3 mb-3 sweep">
-      <div class="flex items-center justify-between gap-3 flex-wrap">
+  <div class="max-w-[1500px] mx-auto px-3 py-3 lg:px-4 lg:py-4 h-screen overflow-hidden">
+    <div class="grid grid-rows-[auto_auto_1fr] gap-3 h-full">
+      <header class="glass rounded-3xl px-4 py-3 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <div class="text-slate-400 text-xs uppercase tracking-[.18em]">Current Status</div>
-          <div id="alertLabel" class="text-3xl lg:text-5xl font-black tracking-tight mt-1">LOADING...</div>
-          <div id="updatedAt" class="text-slate-300 text-sm mt-1">Syncing with Firebase...</div>
+          <div class="text-2xl lg:text-3xl font-black tracking-tight">Smart Safety Control Center</div>
+          <div class="text-slate-400 text-sm lg:text-base">Realtime monitoring via Firebase</div>
         </div>
-        <div class="flex items-center gap-3">
-          <span class="inline-flex items-center gap-2 rounded-full px-3 py-2 bg-black/20 border border-white/10">
-            <span id="liveDot" class="w-2.5 h-2.5 bg-emerald-400 rounded-full pulse-dot"></span> Live
-          </span>
-          <span id="statusChip" class="rounded-full px-3 py-2 bg-emerald-500/15 text-emerald-300 border border-emerald-400/15 font-semibold">SAFE</span>
-        </div>
-      </div>
-    </section>
-
-    <!-- Main Grid -->
-    <main class="grid lg:grid-cols-3 gap-3 mb-3">
-      <!-- Left: Key Metrics -->
-      <div class="lg:col-span-2 grid grid-cols-2 lg:grid-cols-3 gap-3">
-        <!-- Gas -->
-        <div class="glass rounded-3xl p-4">
-          <div class="text-slate-400 text-xs uppercase tracking-[.18em]">Gas Level</div>
-          <div id="gasValue" class="text-4xl font-black mt-2">--</div>
-          <div class="text-slate-400 text-sm mt-1">Threshold: <span id="thresholdValue">2800</span></div>
-        </div>
-
-        <!-- Fire -->
-        <div class="glass rounded-3xl p-4">
-          <div class="text-slate-400 text-xs uppercase tracking-[.18em]">Fire Sensor</div>
-          <div id="fireValue" class="text-4xl font-black mt-2">--</div>
-          <div class="text-slate-400 text-sm mt-1">Digital Status</div>
-        </div>
-
-        <!-- Alert Status -->
-        <div class="glass rounded-3xl p-4">
-          <div class="text-slate-400 text-xs uppercase tracking-[.18em]">Alert State</div>
-          <div id="alertState" class="text-2xl font-black mt-2">INACTIVE</div>
-          <div class="text-slate-400 text-sm mt-1">System State</div>
-        </div>
-
-        <!-- Temperature / Time -->
-        <div class="glass rounded-3xl p-4 col-span-2">
-          <div class="text-slate-400 text-xs uppercase tracking-[.18em]">Device Time</div>
-          <div id="deviceTime" class="text-2xl font-black mt-2">--:--:--</div>
-          <div class="text-slate-400 text-sm mt-1">Last sync: <span id="syncTime">--</span></div>
-        </div>
-
-        <!-- Device Info -->
-        <div class="glass rounded-3xl p-4">
-          <div class="text-slate-400 text-xs uppercase tracking-[.18em]">Device</div>
-          <div id="deviceName" class="text-lg font-black mt-2">--</div>
-          <div class="text-slate-400 text-sm mt-1">Node Name</div>
-        </div>
-      </div>
-
-      <!-- Right: Settings & Controls -->
-      <aside class="glass rounded-3xl p-4 flex flex-col gap-4">
-        <div>
-          <div class="text-lg font-bold mb-3">Gas Threshold Control</div>
-          <div class="flex items-center justify-between mb-2">
-            <div class="text-slate-400 text-sm">Current:</div>
-            <div class="text-2xl font-bold text-cyan-400" id="displayThreshold">2800</div>
-          </div>
-          <input id="thresholdSlider" type="range" min="500" max="4095" step="5" value="2800" 
-                 class="w-full accent-cyan-400" disabled>
-          <div class="flex justify-between text-xs text-slate-400 mt-1"><span>500</span><span>4095</span></div>
-          <div id="thresholdNote" class="text-xs text-slate-400 mt-2">
-            ⓘ Firebase integration: Threshold changes reflected in real-time
+        <div class="flex flex-wrap items-center gap-2 text-sm">
+          <div class="glass rounded-2xl px-3 py-2 min-w-[150px]">
+            <div class="text-slate-400 text-xs">Device Time</div>
+            <div id="timeText" class="font-bold">--</div>
           </div>
         </div>
+      </header>
 
-        <div class="pt-4 border-t border-white/10">
-          <div class="text-sm text-slate-400 mb-3">
-            <strong>📡 Connection Status:</strong>
+      <section id="alertBox" class="glass safe-glow rounded-[28px] px-4 py-3 sweep">
+        <div class="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <div class="text-slate-400 text-xs uppercase tracking-[.18em]">Current Status</div>
+            <div id="alertLabel" class="text-3xl lg:text-5xl font-black tracking-tight mt-1">LOADING...</div>
+            <div id="updatedAt" class="text-slate-300 text-sm mt-1">Updated: --</div>
           </div>
-          <div class="space-y-2 text-sm">
-            <div id="firebaseStatus" class="text-yellow-400">⊘ Connecting to Firebase...</div>
-            <div id="deviceStatus" class="text-slate-400">⊘ Waiting for device...</div>
+          <div class="flex items-center gap-3 text-sm">
+            <span class="inline-flex items-center gap-2 rounded-full px-3 py-2 bg-black/20 border border-white/10"><span id="liveDot" class="w-2.5 h-2.5 bg-emerald-400 rounded-full pulse-dot"></span> Live</span>
+            <span id="statusChip" class="rounded-full px-3 py-2 bg-emerald-500/15 text-emerald-300 border border-emerald-400/15 font-semibold">SAFE</span>
           </div>
         </div>
-      </aside>
-    </main>
+      </section>
 
-    <!-- Footer Info -->
-    <footer class="glass rounded-3xl px-4 py-3 text-center text-slate-400 text-sm">
-      <p>Smart Safety Device • Firebase Real-time Database • Auto-updates every 2 seconds</p>
-      <p class="mt-1">Device sends updates when alert status changes or every 3 seconds</p>
-    </footer>
+      <main class="grid lg:grid-cols-[1.5fr_.9fr] gap-3 min-h-0">
+        <section class="grid grid-rows-[auto_1fr] gap-3 min-h-0">
+          <div class="grid-fit">
+            <div class="glass rounded-3xl p-4 compact-card col-span-3 lg:col-span-4">
+              <div class="text-slate-400 text-xs uppercase tracking-[.18em]">Gas</div>
+              <div id="gasValue" class="text-4xl lg:text-5xl font-black mt-1">--</div>
+              <div class="text-slate-400 text-sm mt-1">Threshold <span id="thresholdMini">2800</span></div>
+            </div>
+            <div class="glass rounded-3xl p-4 compact-card col-span-3 lg:col-span-4">
+              <div class="text-slate-400 text-xs uppercase tracking-[.18em]">Fire</div>
+              <div id="fireValue" class="text-4xl lg:text-5xl font-black mt-1">--</div>
+              <div class="text-slate-400 text-sm mt-1">Digital sensor status</div>
+            </div>
+            <div class="glass rounded-3xl p-4 compact-card col-span-3 lg:col-span-4">
+              <div class="text-slate-400 text-xs uppercase tracking-[.18em]">Alert</div>
+              <div id="alertState" class="text-4xl lg:text-5xl font-black mt-1">--</div>
+              <div class="text-slate-400 text-sm mt-1">Current state</div>
+            </div>
+            <div class="glass rounded-3xl p-4 compact-card col-span-2 lg:col-span-3">
+              <div class="text-slate-400 text-xs uppercase tracking-[.18em]">Device</div>
+              <div id="deviceName" class="text-lg lg:text-2xl font-black mt-1">--</div>
+              <div class="text-slate-400 text-sm mt-1">Device name</div>
+            </div>
+            <div class="glass rounded-3xl p-4 compact-card col-span-2 lg:col-span-3">
+              <div class="text-slate-400 text-xs uppercase tracking-[.18em]">Status</div>
+              <div id="fbStatus" class="text-lg lg:text-2xl font-black mt-1">Firebase</div>
+              <div class="text-slate-400 text-sm mt-1">Connection</div>
+            </div>
+            <div class="glass rounded-3xl p-4 compact-card col-span-2 lg:col-span-3">
+              <div class="text-slate-400 text-xs uppercase tracking-[.18em]">Last Sync</div>
+              <div id="lastSync" class="text-lg lg:text-2xl font-black mt-1">--:--</div>
+              <div class="text-slate-400 text-sm mt-1">Database update</div>
+            </div>
+          </div>
+
+          <div class="glass rounded-3xl p-4 min-h-0 flex flex-col">
+            <div class="flex items-center justify-between gap-2 mb-2 flex-wrap">
+              <div>
+                <div class="text-xl font-bold">Animated Gas Trend</div>
+                <div class="text-slate-400 text-sm">Real-time graph with threshold line</div>
+              </div>
+            </div>
+            <div class="relative flex-1 min-h-[260px]">
+              <canvas id="chartCanvas"></canvas>
+            </div>
+          </div>
+        </section>
+
+        <aside class="grid grid-rows-[auto_auto_1fr] gap-3 min-h-0">
+          <div class="glass rounded-3xl p-4">
+            <div class="text-xl font-bold mb-3">Gas Threshold</div>
+            <div class="text-2xl font-black text-cyan-400"><span id="thresholdValue">2800</span></div>
+            <input id="thresholdSlider" type="range" min="500" max="4095" step="5" value="2800" class="w-full mt-4 accent-cyan-400" disabled>
+            <div class="flex items-center justify-between text-xs text-slate-400 mt-1"><span>500</span><span>4095</span></div>
+            <div id="thresholdMsg" class="text-sm text-slate-400 mt-2">📡 Firebase Sync</div>
+          </div>
+
+          <div class="glass rounded-3xl p-4">
+            <div class="text-xl font-bold mb-3">Diagnostics</div>
+            <div class="grid grid-cols-2 gap-2 text-sm">
+              <div class="rounded-2xl bg-white/5 p-3"><div class="text-slate-400 text-xs">Gas</div><div id="diagGas" class="font-bold mt-1">--</div></div>
+              <div class="rounded-2xl bg-white/5 p-3"><div class="text-slate-400 text-xs">Fire</div><div id="diagFire" class="font-bold mt-1">--</div></div>
+              <div class="rounded-2xl bg-white/5 p-3"><div class="text-slate-400 text-xs">Alert</div><div id="diagAlert" class="font-bold mt-1">--</div></div>
+              <div class="rounded-2xl bg-white/5 p-3"><div class="text-slate-400 text-xs">Time</div><div id="diagTime" class="font-bold mt-1 text-xs">--</div></div>
+            </div>
+          </div>
+
+          <div class="glass rounded-3xl p-4 overflow-auto">
+            <div class="text-xl font-bold mb-3">Connection</div>
+            <div class="space-y-2 text-sm">
+              <div id="devStatus" class="text-yellow-400">⊘ Connecting...</div>
+              <div class="text-slate-400 text-xs mt-3">Auto-refresh: 2 sec</div>
+            </div>
+          </div>
+        </aside>
+      </main>
+    </div>
   </div>
 
 <script>
-  // ===== FIREBASE CONFIG =====
   const FIREBASE_URL = "https://smart-home-safety-default-rtdb.asia-southeast1.firebasedatabase.app/device_state.json";
   
-  let lastUpdateTime = null;
-  let isAlertActive = false;
+  let chart;
+  let gasHistory = [];
 
-  // ===== LOAD DATA FROM FIREBASE =====
+  function initChart(){
+    const ctx = document.getElementById('chartCanvas').getContext('2d');
+    chart = new Chart(ctx, {
+      type: 'line',
+      data: { labels: [], datasets: [
+        { label: 'Gas Level', data: [], borderColor: '#38bdf8', backgroundColor: 'rgba(56,189,248,.15)', fill: true, borderWidth: 3, pointRadius: 0, tension: .36 },
+        { label: 'Threshold', data: [], borderColor: '#fb7185', borderWidth: 2, pointRadius: 0, borderDash: [8,6], tension: 0 }
+      ]},
+      options: { responsive: true, maintainAspectRatio: false, animation: { duration: 500 },
+        plugins: { legend: { labels: { color: '#cbd5e1' } } },
+        scales: {
+          x: { ticks: { color: '#94a3b8', maxRotation: 0, autoSkip: true, maxTicksLimit: 8 }, grid: { color: 'rgba(148,163,184,.08)' } },
+          y: { beginAtZero: true, suggestedMax: 4095, ticks: { color: '#94a3b8', stepSize: 500 }, grid: { color: 'rgba(148,163,184,.08)' } }
+        }
+      }
+    });
+  }
+
   async function loadData() {
     try {
-      const response = await fetch(FIREBASE_URL);
-      if (!response.ok) throw new Error("Firebase fetch failed");
+      const res = await fetch(FIREBASE_URL);
+      if (!res.ok) throw new Error("Firebase error");
       
-      const data = await response.json();
-      if (!data) {
-        updateUI(null);
-        return;
+      const s = await res.json();
+      if (!s) return;
+
+      document.getElementById('gasValue').innerText = s.gas || '?';
+      document.getElementById('fireValue').innerText = (s.fire === "ALERT" ? "🔥 ALERT" : "✓ SAFE");
+      document.getElementById('thresholdValue').innerText = s.threshold || '2800';
+      document.getElementById('thresholdMini').innerText = s.threshold || '2800';
+      document.getElementById('deviceName').innerText = s.device || 'Smart Safety Node';
+      document.getElementById('timeText').innerText = s.clock || '--:--:--';
+
+      const isAlert = s.alert === true;
+      document.getElementById('alertLabel').innerText = s.alertLabel || 'SYSTEM SAFE';
+      document.getElementById('alertState').innerText = isAlert ? '🚨 ACTIVE' : '✓ INACTIVE';
+      
+      const alertBox = document.getElementById('alertBox');
+      const statusChip = document.getElementById('statusChip');
+      const liveDot = document.getElementById('liveDot');
+
+      if (isAlert) {
+        alertBox.className = 'glass alert-glow rounded-[28px] px-4 py-3 sweep';
+        statusChip.className = 'rounded-full px-3 py-2 bg-rose-500/15 text-rose-300 border border-rose-400/15 font-semibold';
+        liveDot.className = 'w-2.5 h-2.5 bg-rose-400 rounded-full pulse-dot';
+      } else {
+        alertBox.className = 'glass safe-glow rounded-[28px] px-4 py-3 sweep';
+        statusChip.className = 'rounded-full px-3 py-2 bg-emerald-500/15 text-emerald-300 border border-emerald-400/15 font-semibold';
+        liveDot.className = 'w-2.5 h-2.5 bg-emerald-400 rounded-full pulse-dot';
       }
 
-      // Update UI with Firebase data
-      updateUI(data);
-      
-      // Update connection status
-      document.getElementById('firebaseStatus').textContent = '✓ Connected to Firebase';
-      document.getElementById('firebaseStatus').className = 'text-emerald-400';
-      document.getElementById('deviceStatus').textContent = '✓ Device Online';
-      document.getElementById('deviceStatus').className = 'text-emerald-400';
+      if (s.timestamp) {
+        document.getElementById('updatedAt').innerText = `Updated: ${new Date(s.timestamp).toLocaleString()}`;
+        document.getElementById('lastSync').innerText = new Date(s.timestamp).toLocaleTimeString();
+        document.getElementById('diagTime').innerText = new Date(s.timestamp).toLocaleTimeString();
+      }
 
-    } catch (error) {
-      console.error("Firebase Error:", error);
-      document.getElementById('firebaseStatus').textContent = '✗ Firebase Error: ' + error.message;
-      document.getElementById('firebaseStatus').className = 'text-red-400';
-      document.getElementById('deviceStatus').textContent = '✗ Device Offline';
-      document.getElementById('deviceStatus').className = 'text-red-400';
+      document.getElementById('diagGas').innerText = s.gas || '--';
+      document.getElementById('diagFire').innerText = s.fire || '--';
+      document.getElementById('diagAlert').innerText = s.alertLabel || '--';
+
+      document.getElementById('devStatus').innerText = '✓ Device Online';
+      document.getElementById('devStatus').className = 'text-emerald-400';
+      document.getElementById('fbStatus').innerText = 'Connected';
+
+      if (!gasHistory.includes(s.gas)) {
+        gasHistory.push(s.gas);
+        if (gasHistory.length > 30) gasHistory.shift();
+      }
+
+      chart.data.labels = gasHistory.map((_, i) => i + 1);
+      chart.data.datasets[0].data = gasHistory;
+      chart.data.datasets[1].data = gasHistory.map(() => s.threshold);
+      chart.update();
+
+    } catch (e) {
+      console.error(e);
+      document.getElementById('devStatus').innerText = '✗ Firebase Error';
+      document.getElementById('devStatus').className = 'text-red-400';
     }
   }
 
-  // ===== UPDATE UI =====
-  function updateUI(data) {
-    if (!data) {
-      document.getElementById('alertLabel').textContent = 'NO DATA';
-      return;
-    }
-
-    // Basic info
-    document.getElementById('deviceName').textContent = data.device || 'Unknown';
-    document.getElementById('gasValue').textContent = data.gas || '?';
-    document.getElementById('fireValue').textContent = (data.fire === "ALERT" ? "🔥 ALERT" : "✓ SAFE");
-    document.getElementById('thresholdValue').textContent = data.threshold || '2800';
-    document.getElementById('displayThreshold').textContent = data.threshold || '2800';
-    document.getElementById('thresholdSlider').value = data.threshold || '2800';
-    document.getElementById('deviceTime').textContent = data.clock || '--:--:--';
-    document.getElementById('deviceName').textContent = data.device || 'Smart Safety Node';
-
-    // Alert status
-    isAlertActive = data.alert === true;
-    document.getElementById('alertLabel').textContent = data.alertLabel || 'SYSTEM SAFE';
-    document.getElementById('alertState').textContent = isAlertActive ? '🚨 ACTIVE' : '✓ INACTIVE';
-
-    // Update box styling
-    const alertBox = document.getElementById('alertBox');
-    const statusChip = document.getElementById('statusChip');
-    const liveDot = document.getElementById('liveDot');
-
-    if (isAlertActive) {
-      alertBox.className = 'glass alert-glow rounded-[28px] px-4 py-3 mb-3 sweep';
-      statusChip.className = 'rounded-full px-3 py-2 bg-rose-500/15 text-rose-300 border border-rose-400/15 font-semibold';
-      liveDot.className = 'w-2.5 h-2.5 bg-rose-400 rounded-full pulse-dot';
-    } else {
-      alertBox.className = 'glass safe-glow rounded-[28px] px-4 py-3 mb-3 sweep';
-      statusChip.className = 'rounded-full px-3 py-2 bg-emerald-500/15 text-emerald-300 border border-emerald-400/15 font-semibold';
-      liveDot.className = 'w-2.5 h-2.5 bg-emerald-400 rounded-full pulse-dot';
-    }
-
-    // Timestamps
-    if (data.timestamp) {
-      document.getElementById('updatedAt').textContent = `Updated: ${new Date(data.timestamp).toLocaleString()}`;
-      document.getElementById('lastUpdate').textContent = new Date(data.timestamp).toLocaleTimeString();
-      document.getElementById('syncTime').textContent = new Date(data.timestamp).toLocaleTimeString();
-    }
-  }
-
-  // ===== INITIALIZE & AUTO-REFRESH =====
+  initChart();
   loadData();
-  setInterval(loadData, 2000);  // Refresh every 2 seconds
-
-  // Log Firebase URL for debugging
-  console.log("Firebase URL:", FIREBASE_URL);
-  console.log("Auto-refreshing every 2 seconds...");
+  setInterval(loadData, 2000);
 </script>
 </body>
 </html>
