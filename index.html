@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart Safety Dashboard</title>
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <style>
+    body {
+      background: #020617;
+      color: white;
+    }
+  </style>
+</head>
+<body class="p-4">
+
+  <h1 class="text-3xl font-bold mb-4">🔥 Smart Safety Dashboard</h1>
+
+  <div class="grid grid-cols-2 gap-4 mb-4">
+
+    <div class="bg-slate-800 p-4 rounded-xl">
+      <h2 class="text-sm text-gray-400">Gas</h2>
+      <p id="gasValue" class="text-3xl font-bold">--</p>
+    </div>
+
+    <div class="bg-slate-800 p-4 rounded-xl">
+      <h2 class="text-sm text-gray-400">Fire</h2>
+      <p id="fireValue" class="text-3xl font-bold">--</p>
+    </div>
+
+    <div class="bg-slate-800 p-4 rounded-xl">
+      <h2 class="text-sm text-gray-400">Status</h2>
+      <p id="alertLabel" class="text-2xl font-bold">--</p>
+    </div>
+
+    <div class="bg-slate-800 p-4 rounded-xl">
+      <h2 class="text-sm text-gray-400">Threshold</h2>
+      <p id="thresholdValue" class="text-2xl font-bold">--</p>
+    </div>
+
+  </div>
+
+  <div class="bg-slate-800 p-4 rounded-xl">
+    <canvas id="chartCanvas"></canvas>
+  </div>
+
+<script>
+
+const FIREBASE_URL = "https://smart-home-safety-default-rtdb.asia-southeast1.firebasedatabase.app/data.json";
+
+let chart;
+let chartData = [];
+
+function initChart(){
+  const ctx = document.getElementById('chartCanvas');
+
+  chart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: [
+        {
+          label: 'Gas',
+          data: [],
+          borderWidth: 2,
+          tension: 0.3
+        },
+        {
+          label: 'Threshold',
+          data: [],
+          borderDash: [5,5]
+        }
+      ]
+    }
+  });
+}
+
+async function loadData(){
+  try {
+    const res = await fetch(FIREBASE_URL + "?_=" + Date.now());
+    const s = await res.json();
+
+    if (!s) return;
+
+    document.getElementById("gasValue").innerText = s.gas ?? "--";
+    document.getElementById("fireValue").innerText = s.fire ?? "--";
+    document.getElementById("thresholdValue").innerText = s.threshold ?? "--";
+
+    document.getElementById("alertLabel").innerText =
+      s.alert ? "🚨 ALERT" : "✅ SAFE";
+
+    // chart update
+    chartData.push(s.gas || 0);
+    if (chartData.length > 50) chartData.shift();
+
+    chart.data.labels = chartData.map((_, i) => i+1);
+    chart.data.datasets[0].data = chartData;
+    chart.data.datasets[1].data = chartData.map(()=>s.threshold || 0);
+
+    chart.update();
+
+  } catch(e){
+    console.error(e);
+  }
+}
+
+initChart();
+loadData();
+setInterval(loadData, 2000);
+
+</script>
+
+</body>
+</html>
