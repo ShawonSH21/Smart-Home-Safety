@@ -41,6 +41,9 @@
 </head>
 <body class="text-slate-100">
   <div class="max-w-[1500px] mx-auto px-3 py-3 lg:px-4 lg:py-4 h-screen overflow-hidden">
+    <audio id="alertSound" preload="auto">
+      <source src="data:audio/wav;base64,UklGRiYAAABXQVZFZm10IBAAAAABAAEAQB8AAAB9AAACABAAZGF0YQIAAAAAAA==" type="audio/wav">
+    </audio>
     <div class="grid grid-rows-[auto_auto_1fr] gap-3 h-full">
       <header class="glass rounded-3xl px-4 py-3 flex flex-wrap items-center justify-between gap-3">
         <div>
@@ -153,6 +156,19 @@
   
   let chart;
   let gasHistory = [];
+  let previousAlertState = false;
+
+  function playAlertSound() {
+    const alertSound = document.getElementById('alertSound');
+    // Reset and play the alert sound
+    alertSound.currentTime = 0;
+    alertSound.play().catch(e => console.log('Sound play error:', e));
+    
+    // Vibration API support
+    if (navigator.vibrate) {
+      navigator.vibrate([200, 100, 200, 100, 200]);
+    }
+  }
 
   function initChart(){
     const ctx = document.getElementById('chartCanvas').getContext('2d');
@@ -190,6 +206,12 @@
       const isAlert = s.alert === true;
       document.getElementById('alertLabel').innerText = s.alertLabel || 'SYSTEM SAFE';
       document.getElementById('alertState').innerText = isAlert ? '🚨 ACTIVE' : '✓ INACTIVE';
+      
+      // Play sound when alert state changes from false to true
+      if (isAlert && !previousAlertState) {
+        playAlertSound();
+      }
+      previousAlertState = isAlert;
       
       const alertBox = document.getElementById('alertBox');
       const statusChip = document.getElementById('statusChip');
