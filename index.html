@@ -3,264 +3,594 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Smart Safety Control Center</title>
+  <title>Smart Safety Dashboard</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
     body {
-      background:
-        radial-gradient(circle at 15% 20%, rgba(34,197,94,.14), transparent 28%),
-        radial-gradient(circle at 85% 0%, rgba(59,130,246,.20), transparent 30%),
-        radial-gradient(circle at 90% 90%, rgba(244,63,94,.15), transparent 22%),
-        linear-gradient(160deg, #020617 0%, #07162b 55%, #061120 100%);
       min-height: 100vh;
+      margin: 0;
+      background: #0b1117;
+      color: #e5edf5;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
-    .glass {
-      background: rgba(15, 23, 42, 0.58);
-      border: 1px solid rgba(255,255,255,.08);
-      box-shadow: 0 12px 40px rgba(0,0,0,.25), inset 0 1px 0 rgba(255,255,255,.04);
-      backdrop-filter: blur(14px);
+    .panel {
+      background: #121b24;
+      border: 1px solid #263442;
+      border-radius: 8px;
     }
-    .alert-glow { box-shadow: 0 0 0 1px rgba(248,113,113,.35), 0 0 30px rgba(239,68,68,.18); }
-    .safe-glow { box-shadow: 0 0 0 1px rgba(74,222,128,.18), 0 0 22px rgba(34,197,94,.08); }
-    .compact-card { min-height: 108px; }
-    .grid-fit { display:grid; grid-template-columns: repeat(12, minmax(0,1fr)); gap: 12px; }
-    @media (max-width: 1024px){ .grid-fit { grid-template-columns: repeat(6, minmax(0,1fr)); } }
-    @media (max-width: 640px){ .grid-fit { grid-template-columns: repeat(2, minmax(0,1fr)); } }
-    .pulse-dot { animation: pulse 1.4s infinite; }
-    @keyframes pulse { 0%,100%{transform:scale(1); opacity:1} 50%{transform:scale(1.25); opacity:.65} }
-    .sweep { position: relative; overflow: hidden; }
-    .sweep::after {
-      content:""; position:absolute; inset:0; transform:translateX(-140%);
-      background: linear-gradient(90deg, transparent, rgba(255,255,255,.08), transparent);
-      animation: sweep 3s infinite;
+    .metric {
+      min-height: 132px;
     }
-    @keyframes sweep { 100% { transform: translateX(140%); } }
+    .chart-canvas {
+      width: 100%;
+      height: 260px;
+      display: block;
+    }
+    .alert-on {
+      background: #2a1114;
+      border-color: #f04444;
+      box-shadow: 0 0 0 1px rgba(240, 68, 68, 0.34);
+    }
+    .alert-off {
+      background: #102119;
+      border-color: #2f8f5b;
+    }
+    .live-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      display: inline-block;
+      background: #35d07f;
+      animation: pulse 1.4s infinite;
+    }
+    .live-dot.warn { background: #f04444; }
+    .live-dot.stale { background: #f4b740; animation: none; }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: .55; transform: scale(1.22); }
+    }
+    input[type="range"] { accent-color: #38bdf8; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
   </style>
 </head>
-<body class="text-slate-100">
-  <div class="max-w-[1500px] mx-auto px-3 py-3 lg:px-4 lg:py-4 h-screen overflow-hidden">
-    <audio id="alertSound" preload="auto">
-      <source src="data:audio/wav;base64,UklGRiYAAABXQVZFZm10IBAAAAABAAEAQB8AAAB9AAACABAAZGF0YQIAAAAAAA==" type="audio/wav">
-    </audio>
-    <div class="grid grid-rows-[auto_auto_1fr] gap-3 h-full">
-      <header class="glass rounded-3xl px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+<body>
+  <div class="mx-auto max-w-6xl px-3 py-3 sm:px-4 sm:py-4">
+    <header class="panel px-4 py-3 mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <h1 class="text-2xl font-black tracking-normal">Smart Safety Dashboard</h1>
+        <p class="text-sm text-slate-400">ESP32 gas and fire monitoring via Firebase Realtime Database</p>
+      </div>
+      <div class="grid grid-cols-2 gap-2 sm:min-w-72">
+        <div class="rounded-md border border-slate-700 px-3 py-2">
+          <div class="text-xs text-slate-400">Firebase</div>
+          <div id="firebaseStatus" class="text-sm font-bold text-yellow-300">Connecting</div>
+        </div>
+        <div class="rounded-md border border-slate-700 px-3 py-2">
+          <div class="text-xs text-slate-400">Device</div>
+          <div id="deviceStatus" class="text-sm font-bold text-yellow-300">Waiting</div>
+        </div>
+      </div>
+    </header>
+
+    <section id="alertBox" class="panel alert-off px-4 py-4 mb-3">
+      <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
-          <div class="text-2xl lg:text-3xl font-black tracking-tight">Smart Safety Control Center</div>
-          <div class="text-slate-400 text-sm lg:text-base">Realtime monitoring via Firebase</div>
+          <div class="text-xs uppercase tracking-wider text-slate-400">Current Status</div>
+          <div id="alertLabel" class="mt-1 text-3xl font-black tracking-normal sm:text-5xl">NO DATA</div>
+          <div id="updatedAt" class="mt-2 text-sm text-slate-300">Waiting for first device update...</div>
         </div>
-        <div class="flex flex-wrap items-center gap-2 text-sm">
-          <div class="glass rounded-2xl px-3 py-2 min-w-[150px]">
-            <div class="text-slate-400 text-xs">Device Time</div>
-            <div id="timeText" class="font-bold">--</div>
-          </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="inline-flex items-center gap-2 rounded-md border border-slate-700 px-3 py-2 text-sm font-semibold">
+            <span id="liveDot" class="live-dot stale"></span>
+            <span id="liveText">Connecting</span>
+          </span>
+          <span id="statusChip" class="rounded-md border border-emerald-500/40 bg-emerald-500/15 px-3 py-2 text-sm font-bold text-emerald-200">SAFE</span>
+          <button id="soundButton" class="rounded-md border border-slate-600 px-3 py-2 text-sm font-bold hover:bg-slate-800">Enable Sound</button>
         </div>
-      </header>
+      </div>
+    </section>
 
-      <section id="alertBox" class="glass safe-glow rounded-[28px] px-4 py-3 sweep">
-        <div class="flex items-center justify-between gap-3 flex-wrap">
-          <div>
-            <div class="text-slate-400 text-xs uppercase tracking-[.18em]">Current Status</div>
-            <div id="alertLabel" class="text-3xl lg:text-5xl font-black tracking-tight mt-1">LOADING...</div>
-            <div id="updatedAt" class="text-slate-300 text-sm mt-1">Updated: --</div>
-          </div>
-          <div class="flex items-center gap-3 text-sm">
-            <span class="inline-flex items-center gap-2 rounded-full px-3 py-2 bg-black/20 border border-white/10"><span id="liveDot" class="w-2.5 h-2.5 bg-emerald-400 rounded-full pulse-dot"></span> Live</span>
-            <span id="statusChip" class="rounded-full px-3 py-2 bg-emerald-500/15 text-emerald-300 border border-emerald-400/15 font-semibold">SAFE</span>
-          </div>
-        </div>
-      </section>
-
-      <main class="grid lg:grid-cols-[1.5fr_.9fr] gap-3 min-h-0">
-        <section class="grid grid-rows-[auto_1fr] gap-3 min-h-0">
-          <div class="grid-fit">
-            <div class="glass rounded-3xl p-4 compact-card col-span-3 lg:col-span-4">
-              <div class="text-slate-400 text-xs uppercase tracking-[.18em]">Gas</div>
-              <div id="gasValue" class="text-4xl lg:text-5xl font-black mt-1">--</div>
-              <div class="text-slate-400 text-sm mt-1">Threshold <span id="thresholdMini">2800</span></div>
+    <main class="grid gap-3 lg:grid-cols-[1fr_340px]">
+      <div class="space-y-3">
+        <section class="grid grid-cols-2 gap-3 md:grid-cols-3">
+          <div class="panel metric p-4">
+            <div class="text-xs uppercase tracking-wider text-slate-400">Gas Level</div>
+            <div id="gasValue" class="mt-2 text-4xl font-black">--</div>
+            <div class="mt-2 h-2 overflow-hidden rounded bg-slate-800">
+              <div id="gasBar" class="h-full w-0 bg-sky-400"></div>
             </div>
-            <div class="glass rounded-3xl p-4 compact-card col-span-3 lg:col-span-4">
-              <div class="text-slate-400 text-xs uppercase tracking-[.18em]">Fire</div>
-              <div id="fireValue" class="text-4xl lg:text-5xl font-black mt-1">--</div>
-              <div class="text-slate-400 text-sm mt-1">Digital sensor status</div>
-            </div>
-            <div class="glass rounded-3xl p-4 compact-card col-span-3 lg:col-span-4">
-              <div class="text-slate-400 text-xs uppercase tracking-[.18em]">Alert</div>
-              <div id="alertState" class="text-4xl lg:text-5xl font-black mt-1">--</div>
-              <div class="text-slate-400 text-sm mt-1">Current state</div>
-            </div>
-            <div class="glass rounded-3xl p-4 compact-card col-span-2 lg:col-span-3">
-              <div class="text-slate-400 text-xs uppercase tracking-[.18em]">Device</div>
-              <div id="deviceName" class="text-lg lg:text-2xl font-black mt-1">--</div>
-              <div class="text-slate-400 text-sm mt-1">Device name</div>
-            </div>
-            <div class="glass rounded-3xl p-4 compact-card col-span-2 lg:col-span-3">
-              <div class="text-slate-400 text-xs uppercase tracking-[.18em]">Status</div>
-              <div id="fbStatus" class="text-lg lg:text-2xl font-black mt-1">Firebase</div>
-              <div class="text-slate-400 text-sm mt-1">Connection</div>
-            </div>
-            <div class="glass rounded-3xl p-4 compact-card col-span-2 lg:col-span-3">
-              <div class="text-slate-400 text-xs uppercase tracking-[.18em]">Last Sync</div>
-              <div id="lastSync" class="text-lg lg:text-2xl font-black mt-1">--:--</div>
-              <div class="text-slate-400 text-sm mt-1">Database update</div>
-            </div>
+            <div class="mt-2 text-sm text-slate-400">Threshold: <span id="thresholdValue">2800</span></div>
           </div>
 
-          <div class="glass rounded-3xl p-4 min-h-0 flex flex-col">
-            <div class="flex items-center justify-between gap-2 mb-2 flex-wrap">
-              <div>
-                <div class="text-xl font-bold">Animated Gas Trend</div>
-                <div class="text-slate-400 text-sm">Real-time graph with threshold line</div>
-              </div>
-            </div>
-            <div class="relative flex-1 min-h-[260px]">
-              <canvas id="chartCanvas"></canvas>
-            </div>
+          <div class="panel metric p-4">
+            <div class="text-xs uppercase tracking-wider text-slate-400">Fire Sensor</div>
+            <div id="fireValue" class="mt-2 text-3xl font-black">--</div>
+            <div class="mt-2 text-sm text-slate-400">Raw: <span id="fireRaw">--</span></div>
+          </div>
+
+          <div class="panel metric p-4">
+            <div class="text-xs uppercase tracking-wider text-slate-400">Alert State</div>
+            <div id="alertState" class="mt-2 text-3xl font-black">--</div>
+            <div class="mt-2 text-sm text-slate-400">Realtime state</div>
+          </div>
+
+          <div class="panel metric p-4">
+            <div class="text-xs uppercase tracking-wider text-slate-400">Device Time</div>
+            <div id="deviceTime" class="mt-2 text-2xl font-black">--:--:--</div>
+            <div class="mt-2 text-sm text-slate-400">Last sync: <span id="syncTime">--</span></div>
+          </div>
+
+          <div class="panel metric p-4">
+            <div class="text-xs uppercase tracking-wider text-slate-400">Network</div>
+            <div id="wifiRssi" class="mt-2 text-2xl font-black">-- dBm</div>
+            <div class="mt-2 text-sm text-slate-400">IP: <span id="deviceIp">--</span></div>
+          </div>
+
+          <div class="panel metric p-4">
+            <div class="text-xs uppercase tracking-wider text-slate-400">Device</div>
+            <div id="deviceName" class="mt-2 text-xl font-black">--</div>
+            <div class="mt-2 text-sm text-slate-400">Uptime: <span id="uptime">--</span></div>
           </div>
         </section>
 
-        <aside class="grid grid-rows-[auto_auto_1fr] gap-3 min-h-0">
-          <div class="glass rounded-3xl p-4">
-            <div class="text-xl font-bold mb-3">Gas Threshold</div>
-            <div class="text-2xl font-black text-cyan-400"><span id="thresholdValue">2800</span></div>
-            <input id="thresholdSlider" type="range" min="500" max="4095" step="5" value="2800" class="w-full mt-4 accent-cyan-400" disabled>
-            <div class="flex items-center justify-between text-xs text-slate-400 mt-1"><span>500</span><span>4095</span></div>
-            <div id="thresholdMsg" class="text-sm text-slate-400 mt-2">📡 Firebase Sync</div>
-          </div>
-
-          <div class="glass rounded-3xl p-4">
-            <div class="text-xl font-bold mb-3">Diagnostics</div>
-            <div class="grid grid-cols-2 gap-2 text-sm">
-              <div class="rounded-2xl bg-white/5 p-3"><div class="text-slate-400 text-xs">Gas</div><div id="diagGas" class="font-bold mt-1">--</div></div>
-              <div class="rounded-2xl bg-white/5 p-3"><div class="text-slate-400 text-xs">Fire</div><div id="diagFire" class="font-bold mt-1">--</div></div>
-              <div class="rounded-2xl bg-white/5 p-3"><div class="text-slate-400 text-xs">Alert</div><div id="diagAlert" class="font-bold mt-1">--</div></div>
-              <div class="rounded-2xl bg-white/5 p-3"><div class="text-slate-400 text-xs">Time</div><div id="diagTime" class="font-bold mt-1 text-xs">--</div></div>
+        <section class="panel p-4">
+          <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h2 class="text-lg font-black">Gas History</h2>
+              <div id="chartSubtitle" class="mt-1 text-sm text-slate-400">Loading readings...</div>
+            </div>
+            <div class="flex items-center gap-3 text-xs text-slate-400">
+              <span class="inline-flex items-center gap-2"><span class="h-2 w-4 rounded-sm bg-sky-400"></span>Gas</span>
+              <span class="inline-flex items-center gap-2"><span class="h-2 w-4 rounded-sm bg-red-400"></span>Threshold</span>
+              <span class="inline-flex items-center gap-2"><span class="h-2 w-2 rounded-full bg-amber-300"></span>Alert</span>
             </div>
           </div>
+          <canvas id="gasChart" class="chart-canvas mt-3" aria-label="Gas readings chart"></canvas>
+        </section>
+      </div>
 
-          <div class="glass rounded-3xl p-4 overflow-auto">
-            <div class="text-xl font-bold mb-3">Connection</div>
-            <div class="space-y-2 text-sm">
-              <div id="devStatus" class="text-yellow-400">⊘ Connecting...</div>
-              <div class="text-slate-400 text-xs mt-3">Auto-refresh: 2 sec</div>
-            </div>
+      <aside class="panel p-4">
+        <div class="flex items-center justify-between gap-3">
+          <h2 class="text-lg font-black">Gas Threshold</h2>
+          <span id="displayThreshold" class="text-2xl font-black text-sky-300">2800</span>
+        </div>
+
+        <input id="thresholdSlider" type="range" min="500" max="4095" step="5" value="2800" class="mt-4 w-full" />
+        <div class="mt-1 flex justify-between text-xs text-slate-400"><span>500</span><span>4095</span></div>
+
+        <div class="mt-3 flex gap-2">
+          <button id="saveThreshold" class="flex-1 rounded-md bg-sky-500 px-3 py-2 text-sm font-black text-slate-950 hover:bg-sky-400">Save</button>
+          <button id="resetThreshold" class="rounded-md border border-slate-600 px-3 py-2 text-sm font-bold hover:bg-slate-800">Reset</button>
+        </div>
+        <div id="thresholdNote" class="mt-3 min-h-5 text-sm text-slate-400">Firmware syncs this value from Firebase.</div>
+
+        <div class="mt-5 border-t border-slate-700 pt-4">
+          <h2 class="text-lg font-black">Recent Alerts</h2>
+          <div id="eventLog" class="mt-3 space-y-2 text-sm text-slate-300">
+            <div class="rounded-md border border-slate-700 px-3 py-2 text-slate-400">No alert event yet.</div>
           </div>
-        </aside>
-      </main>
-    </div>
+        </div>
+      </aside>
+    </main>
   </div>
 
 <script>
-  const FIREBASE_URL = "https://smart-home-safety-default-rtdb.asia-southeast1.firebasedatabase.app/device_state.json";
-  
-  let chart;
-  let gasHistory = [];
-  let previousAlertState = false;
+  const FIREBASE_BASE = "https://smart-home-safety-default-rtdb.asia-southeast1.firebasedatabase.app";
+  const STATE_URL = `${FIREBASE_BASE}/device_state.json`;
+  const READINGS_URL = `${FIREBASE_BASE}/readings.json?orderBy=%22$key%22&limitToLast=50`;
+  const SETTINGS_THRESHOLD_URL = `${FIREBASE_BASE}/settings/gasThreshold.json`;
 
-  function playAlertSound() {
-    const alertSound = document.getElementById('alertSound');
-    // Reset and play the alert sound
-    alertSound.currentTime = 0;
-    alertSound.play().catch(e => console.log('Sound play error:', e));
-    
-    // Vibration API support
-    if (navigator.vibrate) {
-      navigator.vibrate([200, 100, 200, 100, 200]);
+  const elements = {
+    alertBox: document.getElementById("alertBox"),
+    alertLabel: document.getElementById("alertLabel"),
+    updatedAt: document.getElementById("updatedAt"),
+    liveDot: document.getElementById("liveDot"),
+    liveText: document.getElementById("liveText"),
+    statusChip: document.getElementById("statusChip"),
+    firebaseStatus: document.getElementById("firebaseStatus"),
+    deviceStatus: document.getElementById("deviceStatus"),
+    gasValue: document.getElementById("gasValue"),
+    gasBar: document.getElementById("gasBar"),
+    fireValue: document.getElementById("fireValue"),
+    fireRaw: document.getElementById("fireRaw"),
+    thresholdValue: document.getElementById("thresholdValue"),
+    displayThreshold: document.getElementById("displayThreshold"),
+    thresholdSlider: document.getElementById("thresholdSlider"),
+    thresholdNote: document.getElementById("thresholdNote"),
+    saveThreshold: document.getElementById("saveThreshold"),
+    resetThreshold: document.getElementById("resetThreshold"),
+    alertState: document.getElementById("alertState"),
+    deviceTime: document.getElementById("deviceTime"),
+    syncTime: document.getElementById("syncTime"),
+    wifiRssi: document.getElementById("wifiRssi"),
+    deviceIp: document.getElementById("deviceIp"),
+    deviceName: document.getElementById("deviceName"),
+    uptime: document.getElementById("uptime"),
+    soundButton: document.getElementById("soundButton"),
+    eventLog: document.getElementById("eventLog"),
+    gasChart: document.getElementById("gasChart"),
+    chartSubtitle: document.getElementById("chartSubtitle")
+  };
+
+  let latestState = null;
+  let streamOpen = false;
+  let soundEnabled = false;
+  let audioContext = null;
+  let previousAlert = false;
+  let events = [];
+  let chartHistory = [];
+  const MAX_CHART_POINTS = 50;
+
+  function setStatus(target, text, colorClass) {
+    target.textContent = text;
+    target.className = `text-sm font-bold ${colorClass}`;
+  }
+
+  function parseTimestamp(value) {
+    if (!value) return null;
+    const normalized = String(value).replace(/([+-]\d{2})(\d{2})$/, "$1:$2");
+    const date = new Date(normalized);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  function formatUptime(ms) {
+    if (!Number.isFinite(ms)) return "--";
+    const totalSeconds = Math.floor(ms / 1000);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    return `${hours}h ${minutes}m ${seconds}s`;
+  }
+
+  function playAlertTone() {
+    if (!soundEnabled || !audioContext) return;
+    const oscillator = audioContext.createOscillator();
+    const gain = audioContext.createGain();
+    oscillator.type = "square";
+    oscillator.frequency.value = 880;
+    gain.gain.setValueAtTime(0.001, audioContext.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.16, audioContext.currentTime + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.45);
+    oscillator.connect(gain);
+    gain.connect(audioContext.destination);
+    oscillator.start();
+    oscillator.stop(audioContext.currentTime + 0.5);
+  }
+
+  function addEvent(state) {
+    const label = state.alertLabel || (state.alert ? "ALERT" : "SYSTEM SAFE");
+    const time = parseTimestamp(state.timestamp);
+    events.unshift({
+      label,
+      gas: state.gas,
+      fire: state.fire,
+      time: time ? time.toLocaleTimeString() : "--"
+    });
+    events = events.slice(0, 5);
+    elements.eventLog.innerHTML = events.map(event => `
+      <div class="rounded-md border border-slate-700 px-3 py-2">
+        <div class="font-bold">${event.label}</div>
+        <div class="text-xs text-slate-400">Gas ${event.gas ?? "--"} | Fire ${event.fire ?? "--"} | ${event.time}</div>
+      </div>
+    `).join("");
+  }
+
+  function normalizeReading(reading, fallbackKey = "") {
+    if (!reading || typeof reading !== "object") return null;
+    const gas = Number(reading.gas);
+    if (!Number.isFinite(gas)) return null;
+
+    const threshold = Number(reading.threshold || latestState?.threshold || 2800);
+    const timestamp = parseTimestamp(reading.timestamp);
+    const uptime = Number(reading.uptimeMs);
+    const rawTime = reading.timestamp ? String(reading.timestamp) : "";
+    const key = fallbackKey ? `${fallbackKey}:${rawTime || uptime || gas}` : String(rawTime || uptime || Date.now());
+
+    return {
+      key,
+      sortKey: timestamp ? timestamp.getTime() : fallbackKey,
+      gas,
+      threshold: Number.isFinite(threshold) ? threshold : 2800,
+      alert: reading.alert === true,
+      fire: reading.fire,
+      label: timestamp ? timestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "--:--",
+      fullTime: timestamp ? timestamp.toLocaleString() : "Time unavailable"
+    };
+  }
+
+  function upsertChartReading(reading, fallbackKey = "") {
+    const point = normalizeReading(reading, fallbackKey);
+    if (!point) return;
+
+    const existingIndex = chartHistory.findIndex(item => item.key === point.key);
+    if (existingIndex >= 0) chartHistory[existingIndex] = point;
+    else chartHistory.push(point);
+
+    chartHistory.sort(compareChartPoints);
+    chartHistory = chartHistory.slice(-MAX_CHART_POINTS);
+    drawGasChart();
+  }
+
+  function compareChartPoints(a, b) {
+    if (typeof a.sortKey === "number" && typeof b.sortKey === "number") return a.sortKey - b.sortKey;
+    return String(a.sortKey).localeCompare(String(b.sortKey));
+  }
+
+  function setCanvasSize(canvas) {
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    const width = Math.max(320, Math.floor(rect.width));
+    const height = Math.max(220, Math.floor(rect.height));
+    if (canvas.width !== Math.floor(width * dpr) || canvas.height !== Math.floor(height * dpr)) {
+      canvas.width = Math.floor(width * dpr);
+      canvas.height = Math.floor(height * dpr);
+    }
+    const ctx = canvas.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return { ctx, width, height };
+  }
+
+  function drawGasChart() {
+    const canvas = elements.gasChart;
+    const { ctx, width, height } = setCanvasSize(canvas);
+    const padding = { top: 18, right: 16, bottom: 34, left: 46 };
+    const plotWidth = width - padding.left - padding.right;
+    const plotHeight = height - padding.top - padding.bottom;
+    const yMax = 4095;
+
+    ctx.clearRect(0, 0, width, height);
+    ctx.fillStyle = "#0f1720";
+    ctx.fillRect(0, 0, width, height);
+
+    ctx.strokeStyle = "#263442";
+    ctx.lineWidth = 1;
+    ctx.fillStyle = "#94a3b8";
+    ctx.font = "12px Inter, system-ui, sans-serif";
+    ctx.textBaseline = "middle";
+
+    for (let i = 0; i <= 4; i++) {
+      const y = padding.top + (plotHeight / 4) * i;
+      const value = Math.round(yMax - (yMax / 4) * i);
+      ctx.beginPath();
+      ctx.moveTo(padding.left, y);
+      ctx.lineTo(width - padding.right, y);
+      ctx.stroke();
+      ctx.fillText(String(value), 8, y);
+    }
+
+    if (chartHistory.length === 0) {
+      ctx.fillStyle = "#94a3b8";
+      ctx.textAlign = "center";
+      ctx.font = "14px Inter, system-ui, sans-serif";
+      ctx.fillText("No readings yet", width / 2, height / 2);
+      elements.chartSubtitle.textContent = "Waiting for ESP32 reading history.";
+      return;
+    }
+
+    const xForIndex = index => padding.left + (chartHistory.length === 1 ? plotWidth : (plotWidth / (chartHistory.length - 1)) * index);
+    const yForValue = value => padding.top + plotHeight - (Math.max(0, Math.min(yMax, value)) / yMax) * plotHeight;
+    const latest = chartHistory[chartHistory.length - 1];
+    const thresholdY = yForValue(latest.threshold);
+
+    ctx.setLineDash([6, 5]);
+    ctx.strokeStyle = "#f87171";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(padding.left, thresholdY);
+    ctx.lineTo(width - padding.right, thresholdY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.strokeStyle = "#38bdf8";
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    chartHistory.forEach((point, index) => {
+      const x = xForIndex(index);
+      const y = yForValue(point.gas);
+      if (index === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+
+    chartHistory.forEach((point, index) => {
+      const x = xForIndex(index);
+      const y = yForValue(point.gas);
+      ctx.beginPath();
+      ctx.fillStyle = point.alert || point.gas >= point.threshold ? "#fbbf24" : "#38bdf8";
+      ctx.arc(x, y, point.alert || point.gas >= point.threshold ? 4 : 3, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    ctx.fillStyle = "#94a3b8";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "alphabetic";
+    ctx.fillText(chartHistory[0].label, padding.left, height - 10);
+    ctx.textAlign = "right";
+    ctx.fillText(latest.label, width - padding.right, height - 10);
+
+    elements.chartSubtitle.textContent = `${chartHistory.length} readings | Latest gas ${latest.gas} at ${latest.fullTime}`;
+  }
+
+  async function fetchReadingHistory() {
+    try {
+      const response = await fetch(READINGS_URL, { cache: "no-store" });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      if (!data || typeof data !== "object") {
+        chartHistory = [];
+        drawGasChart();
+        return;
+      }
+
+      chartHistory = Object.entries(data)
+        .map(([key, value]) => normalizeReading(value, key))
+        .filter(Boolean)
+        .sort(compareChartPoints)
+        .slice(-MAX_CHART_POINTS);
+      drawGasChart();
+    } catch (error) {
+      elements.chartSubtitle.textContent = `Reading history failed: ${error.message}`;
+      drawGasChart();
     }
   }
 
-  function initChart(){
-    const ctx = document.getElementById('chartCanvas').getContext('2d');
-    chart = new Chart(ctx, {
-      type: 'line',
-      data: { labels: [], datasets: [
-        { label: 'Gas Level', data: [], borderColor: '#38bdf8', backgroundColor: 'rgba(56,189,248,.15)', fill: true, borderWidth: 3, pointRadius: 0, tension: .36 },
-        { label: 'Threshold', data: [], borderColor: '#fb7185', borderWidth: 2, pointRadius: 0, borderDash: [8,6], tension: 0 }
-      ]},
-      options: { responsive: true, maintainAspectRatio: false, animation: { duration: 500 },
-        plugins: { legend: { labels: { color: '#cbd5e1' } } },
-        scales: {
-          x: { ticks: { color: '#94a3b8', maxRotation: 0, autoSkip: true, maxTicksLimit: 8 }, grid: { color: 'rgba(148,163,184,.08)' } },
-          y: { beginAtZero: true, suggestedMax: 4095, ticks: { color: '#94a3b8', stepSize: 500 }, grid: { color: 'rgba(148,163,184,.08)' } }
-        }
-      }
+  function updateUI(data) {
+    if (!data || typeof data !== "object" || Array.isArray(data)) {
+      latestState = null;
+      elements.alertLabel.textContent = "NO DATA";
+      elements.updatedAt.textContent = "No /device_state object found in Firebase.";
+      setStatus(elements.deviceStatus, "No data", "text-yellow-300");
+      return;
+    }
+
+    latestState = data;
+    upsertChartReading(data, "live-state");
+    const alertActive = data.alert === true;
+    const label = data.alertLabel || (alertActive ? "ALERT" : "SYSTEM SAFE");
+    const timestamp = parseTimestamp(data.timestamp);
+    const ageMs = timestamp ? Date.now() - timestamp.getTime() : Infinity;
+    const stale = !timestamp || ageMs > 15000;
+    const threshold = Number(data.threshold || 2800);
+    const gas = Number(data.gas || 0);
+    const gasPercent = Math.max(0, Math.min(100, (gas / 4095) * 100));
+
+    elements.deviceName.textContent = data.device || "Smart Safety Node";
+    elements.gasValue.textContent = Number.isFinite(gas) ? gas : "--";
+    elements.gasBar.style.width = `${gasPercent}%`;
+    elements.gasBar.className = `h-full ${gas >= threshold ? "bg-red-400" : "bg-sky-400"}`;
+    elements.thresholdValue.textContent = threshold;
+    elements.displayThreshold.textContent = threshold;
+    if (document.activeElement !== elements.thresholdSlider) elements.thresholdSlider.value = threshold;
+
+    elements.fireValue.textContent = data.fire === "ALERT" ? "ALERT" : "SAFE";
+    elements.fireValue.className = `mt-2 text-3xl font-black ${data.fire === "ALERT" ? "text-red-300" : "text-emerald-300"}`;
+    elements.fireRaw.textContent = data.fireRaw ?? "--";
+    elements.alertLabel.textContent = label;
+    elements.alertState.textContent = alertActive ? "ACTIVE" : "INACTIVE";
+    elements.deviceTime.textContent = data.clock || "--:--:--";
+    elements.wifiRssi.textContent = Number.isFinite(Number(data.wifiRssi)) ? `${data.wifiRssi} dBm` : "-- dBm";
+    elements.deviceIp.textContent = data.ip || "--";
+    elements.uptime.textContent = formatUptime(Number(data.uptimeMs));
+
+    if (timestamp) {
+      elements.updatedAt.textContent = `Updated: ${timestamp.toLocaleString()}`;
+      elements.syncTime.textContent = timestamp.toLocaleTimeString();
+    } else {
+      elements.updatedAt.textContent = "Updated: timestamp unavailable";
+      elements.syncTime.textContent = "--";
+    }
+
+    if (alertActive) {
+      elements.alertBox.className = "panel alert-on px-4 py-4 mb-3";
+      elements.statusChip.className = "rounded-md border border-red-400/50 bg-red-500/20 px-3 py-2 text-sm font-bold text-red-100";
+      elements.statusChip.textContent = "ALERT";
+      elements.liveDot.className = stale ? "live-dot stale" : "live-dot warn";
+    } else {
+      elements.alertBox.className = "panel alert-off px-4 py-4 mb-3";
+      elements.statusChip.className = "rounded-md border border-emerald-500/40 bg-emerald-500/15 px-3 py-2 text-sm font-bold text-emerald-200";
+      elements.statusChip.textContent = "SAFE";
+      elements.liveDot.className = stale ? "live-dot stale" : "live-dot";
+    }
+
+    elements.liveText.textContent = stale ? "Stale" : "Live";
+    setStatus(elements.deviceStatus, stale ? "Stale" : "Online", stale ? "text-yellow-300" : "text-emerald-300");
+
+    if (alertActive && !previousAlert) {
+      addEvent(data);
+      playAlertTone();
+    }
+    if (!alertActive && previousAlert) addEvent(data);
+    previousAlert = alertActive;
+  }
+
+  async function fetchOnce() {
+    try {
+      const response = await fetch(STATE_URL, { cache: "no-store" });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      updateUI(await response.json());
+      setStatus(elements.firebaseStatus, streamOpen ? "Streaming" : "Polling", "text-emerald-300");
+    } catch (error) {
+      setStatus(elements.firebaseStatus, "Error", "text-red-300");
+      setStatus(elements.deviceStatus, "Offline", "text-red-300");
+      elements.updatedAt.textContent = `Firebase read failed: ${error.message}`;
+    }
+  }
+
+  function startStream() {
+    if (!window.EventSource) {
+      setStatus(elements.firebaseStatus, "Polling", "text-yellow-300");
+      fetchOnce();
+      return;
+    }
+
+    const source = new EventSource(STATE_URL);
+    source.onopen = () => {
+      streamOpen = true;
+      setStatus(elements.firebaseStatus, "Streaming", "text-emerald-300");
+    };
+    source.onerror = () => {
+      streamOpen = false;
+      setStatus(elements.firebaseStatus, "Reconnecting", "text-yellow-300");
+    };
+    source.addEventListener("put", event => {
+      const payload = JSON.parse(event.data);
+      if (payload.path === "/") updateUI(payload.data);
+    });
+    source.addEventListener("patch", event => {
+      const payload = JSON.parse(event.data);
+      if (payload.path === "/" && latestState) updateUI({ ...latestState, ...payload.data });
     });
   }
 
-  async function loadData() {
+  elements.thresholdSlider.addEventListener("input", () => {
+    elements.displayThreshold.textContent = elements.thresholdSlider.value;
+  });
+
+  elements.saveThreshold.addEventListener("click", async () => {
+    const value = Number(elements.thresholdSlider.value);
+    elements.saveThreshold.disabled = true;
+    elements.thresholdNote.textContent = "Saving threshold...";
     try {
-      const res = await fetch(FIREBASE_URL);
-      if (!res.ok) throw new Error("Firebase error");
-      
-      const s = await res.json();
-      if (!s) return;
-
-      document.getElementById('gasValue').innerText = s.gas || '?';
-      document.getElementById('fireValue').innerText = (s.fire === "ALERT" ? "🔥 ALERT" : "✓ SAFE");
-      document.getElementById('thresholdValue').innerText = s.threshold || '2800';
-      document.getElementById('thresholdMini').innerText = s.threshold || '2800';
-      document.getElementById('deviceName').innerText = s.device || 'Smart Safety Node';
-      document.getElementById('timeText').innerText = s.clock || '--:--:--';
-
-      const isAlert = s.alert === true;
-      document.getElementById('alertLabel').innerText = s.alertLabel || 'SYSTEM SAFE';
-      document.getElementById('alertState').innerText = isAlert ? '🚨 ACTIVE' : '✓ INACTIVE';
-      
-      // Play sound when alert state changes from false to true
-      if (isAlert && !previousAlertState) {
-        playAlertSound();
-      }
-      previousAlertState = isAlert;
-      
-      const alertBox = document.getElementById('alertBox');
-      const statusChip = document.getElementById('statusChip');
-      const liveDot = document.getElementById('liveDot');
-
-      if (isAlert) {
-        alertBox.className = 'glass alert-glow rounded-[28px] px-4 py-3 sweep';
-        statusChip.className = 'rounded-full px-3 py-2 bg-rose-500/15 text-rose-300 border border-rose-400/15 font-semibold';
-        liveDot.className = 'w-2.5 h-2.5 bg-rose-400 rounded-full pulse-dot';
-      } else {
-        alertBox.className = 'glass safe-glow rounded-[28px] px-4 py-3 sweep';
-        statusChip.className = 'rounded-full px-3 py-2 bg-emerald-500/15 text-emerald-300 border border-emerald-400/15 font-semibold';
-        liveDot.className = 'w-2.5 h-2.5 bg-emerald-400 rounded-full pulse-dot';
-      }
-
-      if (s.timestamp) {
-        document.getElementById('updatedAt').innerText = `Updated: ${new Date(s.timestamp).toLocaleString()}`;
-        document.getElementById('lastSync').innerText = new Date(s.timestamp).toLocaleTimeString();
-        document.getElementById('diagTime').innerText = new Date(s.timestamp).toLocaleTimeString();
-      }
-
-      document.getElementById('diagGas').innerText = s.gas || '--';
-      document.getElementById('diagFire').innerText = s.fire || '--';
-      document.getElementById('diagAlert').innerText = s.alertLabel || '--';
-
-      document.getElementById('devStatus').innerText = '✓ Device Online';
-      document.getElementById('devStatus').className = 'text-emerald-400';
-      document.getElementById('fbStatus').innerText = 'Connected';
-
-      if (!gasHistory.includes(s.gas)) {
-        gasHistory.push(s.gas);
-        if (gasHistory.length > 30) gasHistory.shift();
-      }
-
-      chart.data.labels = gasHistory.map((_, i) => i + 1);
-      chart.data.datasets[0].data = gasHistory;
-      chart.data.datasets[1].data = gasHistory.map(() => s.threshold);
-      chart.update();
-
-    } catch (e) {
-      console.error(e);
-      document.getElementById('devStatus').innerText = '✗ Firebase Error';
-      document.getElementById('devStatus').className = 'text-red-400';
+      const response = await fetch(SETTINGS_THRESHOLD_URL, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(value)
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      elements.thresholdNote.textContent = "Saved. Firmware will sync shortly.";
+    } catch (error) {
+      elements.thresholdNote.textContent = `Save failed: ${error.message}. Check Firebase write rules.`;
+    } finally {
+      elements.saveThreshold.disabled = false;
     }
-  }
+  });
 
-  initChart();
-  loadData();
-  setInterval(loadData, 2000);
+  elements.resetThreshold.addEventListener("click", () => {
+    elements.thresholdSlider.value = latestState?.threshold || 2800;
+    elements.displayThreshold.textContent = elements.thresholdSlider.value;
+    elements.thresholdNote.textContent = "Reset to latest device value.";
+  });
+
+  elements.soundButton.addEventListener("click", async () => {
+    audioContext = audioContext || new AudioContext();
+    await audioContext.resume();
+    soundEnabled = true;
+    elements.soundButton.textContent = "Sound On";
+    elements.soundButton.disabled = true;
+  });
+
+  startStream();
+  fetchReadingHistory();
+  drawGasChart();
+  fetchOnce();
+  window.addEventListener("resize", drawGasChart);
+  setInterval(() => {
+    if (!streamOpen) fetchOnce();
+    if (latestState) updateUI(latestState);
+  }, 4000);
+  setInterval(fetchReadingHistory, 30000);
 </script>
 </body>
 </html>
