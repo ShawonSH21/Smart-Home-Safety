@@ -37,6 +37,75 @@
       background: #102119;
       border-color: #2f8f5b;
     }
+    .danger-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 50;
+      display: grid;
+      place-items: center;
+      pointer-events: none;
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity 180ms ease, visibility 180ms ease;
+      background:
+        radial-gradient(circle at center, rgba(255, 38, 38, 0.08) 0, rgba(255, 38, 38, 0.24) 38%, rgba(10, 4, 5, 0.82) 100%),
+        repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.05) 0 1px, transparent 1px 8px);
+    }
+    .danger-overlay::before,
+    .danger-overlay::after {
+      content: "";
+      position: absolute;
+      inset: -18%;
+      background: conic-gradient(from 45deg, transparent 0 16%, rgba(255, 45, 45, 0.42) 16% 24%, transparent 24% 50%, rgba(255, 45, 45, 0.36) 50% 58%, transparent 58% 100%);
+      animation: dangerSweep 1.2s linear infinite;
+    }
+    .danger-overlay::after {
+      animation-direction: reverse;
+      animation-duration: 1.8s;
+      opacity: 0.55;
+    }
+    .danger-panel {
+      position: relative;
+      z-index: 1;
+      width: min(92vw, 720px);
+      border: 2px solid rgba(255, 90, 90, 0.95);
+      border-radius: 8px;
+      background: rgba(30, 6, 8, 0.82);
+      box-shadow: 0 0 36px rgba(255, 42, 42, 0.48), inset 0 0 24px rgba(255, 42, 42, 0.24);
+      padding: clamp(20px, 5vw, 44px);
+      text-align: center;
+      animation: dangerPanelPulse 900ms ease-in-out infinite;
+    }
+    .danger-title {
+      color: #fff4f4;
+      font-size: clamp(48px, 12vw, 112px);
+      font-weight: 900;
+      line-height: 0.9;
+      text-shadow: 0 0 16px rgba(255, 40, 40, 0.95), 0 0 44px rgba(255, 40, 40, 0.72);
+    }
+    .danger-reason {
+      margin-top: 16px;
+      color: #fecaca;
+      font-size: clamp(16px, 3.8vw, 26px);
+      font-weight: 800;
+    }
+    body.danger-active .danger-overlay {
+      opacity: 1;
+      visibility: visible;
+      animation: dangerFlash 640ms steps(2, end) infinite;
+    }
+    @keyframes dangerSweep {
+      from { transform: rotate(0deg) scale(1); }
+      to { transform: rotate(360deg) scale(1); }
+    }
+    @keyframes dangerFlash {
+      0%, 100% { filter: brightness(1); }
+      50% { filter: brightness(1.35); }
+    }
+    @keyframes dangerPanelPulse {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.025); }
+    }
     .live-dot {
       width: 10px;
       height: 10px;
@@ -53,9 +122,25 @@
     }
     input[type="range"] { accent-color: #38bdf8; }
     button:disabled { opacity: .5; cursor: not-allowed; }
+    @media (prefers-reduced-motion: reduce) {
+      .danger-overlay,
+      .danger-overlay::before,
+      .danger-overlay::after,
+      .danger-panel,
+      .live-dot {
+        animation: none !important;
+      }
+    }
   </style>
 </head>
 <body>
+  <div id="dangerOverlay" class="danger-overlay" aria-hidden="true">
+    <div class="danger-panel" role="alert">
+      <div class="danger-title">DANGER</div>
+      <div id="dangerReason" class="danger-reason">Safety alert active</div>
+    </div>
+  </div>
+
   <div class="mx-auto max-w-6xl px-3 py-3 sm:px-4 sm:py-4">
     <header class="panel px-4 py-3 mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <div>
@@ -183,6 +268,8 @@
   const SETTINGS_THRESHOLD_URL = `${FIREBASE_BASE}/settings/gasThreshold.json`;
 
   const elements = {
+    dangerOverlay: document.getElementById("dangerOverlay"),
+    dangerReason: document.getElementById("dangerReason"),
     alertBox: document.getElementById("alertBox"),
     alertLabel: document.getElementById("alertLabel"),
     updatedAt: document.getElementById("updatedAt"),
@@ -218,6 +305,7 @@
   let streamOpen = false;
   let soundEnabled = false;
   let audioContext = null;
+  let alertSoundTimer = null;
   let previousAlert = false;
   let events = [];
   let chartHistory = [];
@@ -244,28 +332,82 @@
     return `${hours}h ${minutes}m ${seconds}s`;
   }
 
+  function readNumber(data, keys, fallback = 0) {
+    for (const key of keys) {
+      const value = Number(data?.[key]);
+      if (Number.isFinite(value)) return value;
+    }
+    return fallback;
+  }
+
+  function readFireAlert(data) {
+    const fire = data?.fire;
+    return data?.fireAlert === true ||
+      data?.fireDetected === true ||
+      fire === true ||
+      String(fire || "").toUpperCase() === "ALERT";
+  }
+
+  function readAlertActive(data) {
+    return data?.alert === true || data?.alertActive === true || readFireAlert(data) || data?.gasAlert === true;
+  }
+
   function playAlertTone() {
     if (!soundEnabled || !audioContext) return;
-    const oscillator = audioContext.createOscillator();
-    const gain = audioContext.createGain();
-    oscillator.type = "square";
-    oscillator.frequency.value = 880;
-    gain.gain.setValueAtTime(0.001, audioContext.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.16, audioContext.currentTime + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.45);
-    oscillator.connect(gain);
-    gain.connect(audioContext.destination);
-    oscillator.start();
-    oscillator.stop(audioContext.currentTime + 0.5);
+    if (audioContext.state !== "running") return;
+
+    [880, 660].forEach((frequency, index) => {
+      const startAt = audioContext.currentTime + index * 0.18;
+      const oscillator = audioContext.createOscillator();
+      const gain = audioContext.createGain();
+      oscillator.type = "square";
+      oscillator.frequency.value = frequency;
+      gain.gain.setValueAtTime(0.001, startAt);
+      gain.gain.exponentialRampToValueAtTime(0.16, startAt + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, startAt + 0.16);
+      oscillator.connect(gain);
+      gain.connect(audioContext.destination);
+      oscillator.start(startAt);
+      oscillator.stop(startAt + 0.18);
+    });
+  }
+
+  function startAlertSound() {
+    if (!soundEnabled || !audioContext || alertSoundTimer) return;
+    playAlertTone();
+    alertSoundTimer = window.setInterval(playAlertTone, 1200);
+  }
+
+  function stopAlertSound() {
+    if (!alertSoundTimer) return;
+    window.clearInterval(alertSoundTimer);
+    alertSoundTimer = null;
+  }
+
+  function syncAlertSound(alertActive) {
+    if (alertActive) startAlertSound();
+    else stopAlertSound();
+  }
+
+  function syncDangerEffect(alertActive, label, gas, threshold, fireAlert) {
+    document.body.classList.toggle("danger-active", alertActive);
+    elements.dangerOverlay.setAttribute("aria-hidden", alertActive ? "false" : "true");
+    if (!alertActive) return;
+
+    const parts = [label || "Safety alert active"];
+    if (Number.isFinite(gas)) parts.push(`Gas ${gas} / ${threshold}`);
+    if (fireAlert) parts.push("Fire ALERT");
+    elements.dangerReason.textContent = parts.join(" | ");
   }
 
   function addEvent(state) {
-    const label = state.alertLabel || (state.alert ? "ALERT" : "SYSTEM SAFE");
+    const alertActive = readAlertActive(state);
+    const label = state.alertLabel || (alertActive ? "ALERT" : "SYSTEM SAFE");
     const time = parseTimestamp(state.timestamp);
     events.unshift({
       label,
-      gas: state.gas,
-      fire: state.fire,
+      gas: readNumber(state, ["gas", "gasValue", "gasLevel", "mq2"], null),
+      fire: readFireAlert(state) ? "ALERT" : "SAFE",
       time: time ? time.toLocaleTimeString() : "--"
     });
     events = events.slice(0, 5);
@@ -279,10 +421,10 @@
 
   function normalizeReading(reading, fallbackKey = "") {
     if (!reading || typeof reading !== "object") return null;
-    const gas = Number(reading.gas);
+    const gas = readNumber(reading, ["gas", "gasValue", "gasLevel", "mq2"], NaN);
     if (!Number.isFinite(gas)) return null;
 
-    const threshold = Number(reading.threshold || latestState?.threshold || 2800);
+    const threshold = readNumber(reading, ["threshold", "gasThreshold"], readNumber(latestState, ["threshold", "gasThreshold"], 2800));
     const timestamp = parseTimestamp(reading.timestamp);
     const uptime = Number(reading.uptimeMs);
     const rawTime = reading.timestamp ? String(reading.timestamp) : "";
@@ -293,7 +435,7 @@
       sortKey: timestamp ? timestamp.getTime() : fallbackKey,
       gas,
       threshold: Number.isFinite(threshold) ? threshold : 2800,
-      alert: reading.alert === true,
+      alert: readAlertActive(reading),
       fire: reading.fire,
       label: timestamp ? timestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "--:--",
       fullTime: timestamp ? timestamp.toLocaleString() : "Time unavailable"
@@ -439,6 +581,7 @@
   function updateUI(data) {
     if (!data || typeof data !== "object" || Array.isArray(data)) {
       latestState = null;
+      syncDangerEffect(false);
       elements.alertLabel.textContent = "NO DATA";
       elements.updatedAt.textContent = "No /device_state object found in Firebase.";
       setStatus(elements.deviceStatus, "No data", "text-yellow-300");
@@ -447,13 +590,15 @@
 
     latestState = data;
     upsertChartReading(data, "live-state");
-    const alertActive = data.alert === true;
+    const fireAlert = readFireAlert(data);
+    const gasAlert = data.gasAlert === true;
+    const alertActive = data.alert === true || data.alertActive === true || gasAlert || fireAlert;
     const label = data.alertLabel || (alertActive ? "ALERT" : "SYSTEM SAFE");
     const timestamp = parseTimestamp(data.timestamp);
     const ageMs = timestamp ? Date.now() - timestamp.getTime() : Infinity;
     const stale = !timestamp || ageMs > 15000;
-    const threshold = Number(data.threshold || 2800);
-    const gas = Number(data.gas || 0);
+    const threshold = readNumber(data, ["threshold", "gasThreshold"], 2800);
+    const gas = readNumber(data, ["gas", "gasValue", "gasLevel", "mq2"], 0);
     const gasPercent = Math.max(0, Math.min(100, (gas / 4095) * 100));
 
     elements.deviceName.textContent = data.device || "Smart Safety Node";
@@ -464,8 +609,8 @@
     elements.displayThreshold.textContent = threshold;
     if (document.activeElement !== elements.thresholdSlider) elements.thresholdSlider.value = threshold;
 
-    elements.fireValue.textContent = data.fire === "ALERT" ? "ALERT" : "SAFE";
-    elements.fireValue.className = `mt-2 text-3xl font-black ${data.fire === "ALERT" ? "text-red-300" : "text-emerald-300"}`;
+    elements.fireValue.textContent = fireAlert ? "ALERT" : "SAFE";
+    elements.fireValue.className = `mt-2 text-3xl font-black ${fireAlert ? "text-red-300" : "text-emerald-300"}`;
     elements.fireRaw.textContent = data.fireRaw ?? "--";
     elements.alertLabel.textContent = label;
     elements.alertState.textContent = alertActive ? "ACTIVE" : "INACTIVE";
@@ -496,12 +641,13 @@
 
     elements.liveText.textContent = stale ? "Stale" : "Live";
     setStatus(elements.deviceStatus, stale ? "Stale" : "Online", stale ? "text-yellow-300" : "text-emerald-300");
+    syncDangerEffect(alertActive, label, gas, threshold, fireAlert);
 
     if (alertActive && !previousAlert) {
       addEvent(data);
-      playAlertTone();
     }
     if (!alertActive && previousAlert) addEvent(data);
+    syncAlertSound(alertActive);
     previousAlert = alertActive;
   }
 
@@ -574,11 +720,19 @@
   });
 
   elements.soundButton.addEventListener("click", async () => {
-    audioContext = audioContext || new AudioContext();
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) {
+      elements.soundButton.textContent = "Sound Unsupported";
+      elements.soundButton.disabled = true;
+      return;
+    }
+
+    audioContext = audioContext || new AudioContextClass();
     await audioContext.resume();
     soundEnabled = true;
     elements.soundButton.textContent = "Sound On";
     elements.soundButton.disabled = true;
+    if (readAlertActive(latestState)) startAlertSound();
   });
 
   startStream();
